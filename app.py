@@ -1,5 +1,9 @@
+import hashlib
 import os
+import secrets
+import smtplib
 import sqlite3
+from email.message import EmailMessage
 from datetime import date, datetime
 from functools import wraps
 
@@ -8,7 +12,50 @@ from flask import Flask, jsonify, redirect, render_template_string, request, ses
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "prestamos-escolares-dev")
 DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "prestamos.db"))
-ADMIN_PIN = os.environ.get("ADMIN_PIN", "1234")
+ADMIN_PIN = os.environ.get("ADMIN_PIN", "2010")
+
+
+
+DOMINIO = "@sanagustin.edu.pe"
+
+
+
+def enviar_codigo(destino, codigo, nombre):
+    host = os.environ.get("MAIL_SERVER")
+    user = os.environ.get("MAIL_USERNAME")
+    password = os.environ.get("MAIL_PASSWORD")
+    port = int(os.environ.get("MAIL_PORT", "587"))
+    if not host or not user or not password:
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = "Código de verificación — Materiales San Agustín"
+    msg["From"] = os.environ.get("MAIL_FROM", user)
+    msg["To"] = destino
+    msg.set_content(
+        f"Hola {nombre},\n\nTu código de verificación es {codigo}.\n"
+        "Ingrésalo en la página de verificación para activar tu cuenta.\n"
+    )
+    with smtplib.SMTP(host, port, timeout=20) as smtp:
+        smtp.starttls()
+        smtp.login(user, password)
+        smtp.send_message(msg)
+    return True
+
+
+def hash_clave(clave, salt=None):
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", clave.encode(), salt.encode(), 120_000).hex()
+    return salt, digest
+
+
+def usuario_actual(conn):
+    uid = session.get("usuario_id")
+    if not uid:
+        return None
+    user = conn.execute("SELECT * FROM usuarios WHERE id = ?", (uid,)).fetchone()
+    if not user or not user["is_verified"]:
+        return None
+    return user
 
 
 def get_db():
@@ -37,10 +84,42 @@ def init_db():
             fecha_real TEXT,
             estado_solicitud TEXT NOT NULL,
             dias_tardanza INTEGER NOT NULL DEFAULT 0,
+            usuario_id INTEGER,
             FOREIGN KEY (material_id) REFERENCES materiales(id)
+        );
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre_completo TEXT NOT NULL,
+            grado_seccion TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            rol TEXT NOT NULL DEFAULT 'estudiante',
+            is_verified INTEGER NOT NULL DEFAULT 0,
+            verification_code TEXT
         );
         """
     )
+
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(usuarios)")]
+    if cols and "email" not in cols:
+        conn.execute("ALTER TABLE usuarios RENAME TO usuarios_old")
+        conn.execute("""
+            CREATE TABLE usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre_completo TEXT NOT NULL,
+                grado_seccion TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                rol TEXT NOT NULL DEFAULT 'estudiante',
+                is_verified INTEGER NOT NULL DEFAULT 0,
+                verification_code TEXT
+            )
+        """)
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(solicitudes_prestamos)")]
+    if "usuario_id" not in cols:
+        conn.execute("ALTER TABLE solicitudes_prestamos ADD COLUMN usuario_id INTEGER")
     count = conn.execute("SELECT COUNT(*) AS c FROM materiales").fetchone()["c"]
     if count == 0:
         seed = [
@@ -128,7 +207,10 @@ ESTUDIANTE = HEAD + """
 <nav class="navbar navbar-expand bg-white border-bottom">
   <div class="container">
     <span class="navbar-brand fw-semibold">Materiales escolares</span>
-    <a class="btn btn-outline-success btn-sm" href="/admin">Acceso profesor</a>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="/salir">Salir</a>
+      <a class="btn btn-outline-success btn-sm" href="/admin">Acceso profesor</a>
+    </div>
   </div>
 </nav>
 <main class="container py-4">
@@ -139,11 +221,8 @@ ESTUDIANTE = HEAD + """
       <section class="card shadow-sm">
         <div class="card-body">
           <h2 class="h5 card-title">Solicitud de préstamo</h2>
+          <p class="small text-secondary mb-2">Perfil: <strong>{{ nombre }}</strong><br>{{ grado }} · {{ correo }}</p>
           <form id="form">
-            <label class="form-label">Nombre completo</label>
-            <input class="form-control mb-2" name="estudiante" required placeholder="Nombre y apellido"/>
-            <label class="form-label">Grado / sección</label>
-            <input class="form-control mb-2" name="grado" required placeholder="Ej. 4° A"/>
             <label class="form-label">Material deseado</label>
             <select class="form-select mb-2" name="material_id" id="mats" required></select>
             <label class="form-label">Fecha propuesta de entrega</label>
@@ -159,8 +238,7 @@ ESTUDIANTE = HEAD + """
         <div class="card-body">
           <h2 class="h5">Disponibles ahora</h2>
           <div id="catalogo" class="table-responsive"></div>
-          <h2 class="h5 mt-4">Mis solicitudes recientes</h2>
-          <input id="q" class="form-control mb-3" placeholder="Busca por tu nombre"/>
+          <h2 class="h5 mt-4">Préstamos activos</h2><div id="activos" class="table-responsive mb-3"></div><h2 class="h5">Historial</h2>
           <div id="mias" class="table-responsive"></div>
         </div>
       </section>
@@ -187,16 +265,20 @@ async function load(){
     : '<p class="text-secondary mb-0">No hay materiales libres en este momento.</p>';
   renderMias();
 }
-function renderMias(){
-  const q = document.getElementById('q').value.trim().toLowerCase();
-  const rows = DATA.solicitudes.filter(s => !q || s.estudiante.toLowerCase().includes(q));
-  document.getElementById('mias').innerHTML = rows.length ? `<table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Estudiante</th><th>Material</th><th>Estado</th><th>Entrega</th></tr></thead><tbody>
-    ${rows.slice(0,30).map(s=>`<tr class="${s.dias_tardanza>0?'late':''}"><td>${esc(s.estudiante)}<br><small class="text-secondary">${esc(s.grado)}</small></td><td>${esc(s.material)}</td>
+function tabla(rows, vacio){
+  if (!rows.length) return '<p class="text-secondary mb-0">'+vacio+'</p>';
+  return `<table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Material</th><th>Estado</th><th>Entrega</th></tr></thead><tbody>
+    ${rows.slice(0,40).map(s=>`<tr class="${s.dias_tardanza>0?'late':''}"><td>${esc(s.material)}</td>
     <td><span class="badge ${s.estado_solicitud==='Pendiente'?'text-bg-warning':s.estado_solicitud==='Aprobado'&&s.dias_tardanza?'text-bg-danger':s.estado_solicitud==='Rechazado'||s.estado_solicitud==='Devuelto'?'text-bg-secondary':'text-bg-success'}">${esc(s.estado_solicitud)}</span>
     ${s.dias_tardanza>0?`<div class="text-danger fw-semibold small mt-1">${s.dias_tardanza} día(s) de atraso</div>`:''}</td>
-    <td>${s.fecha_devolucion||'—'}</td></tr>`).join('')}</tbody></table>` : '<p class="text-secondary mb-0">Escribe tu nombre para ver tus solicitudes, o envía una nueva.</p>';
+    <td>${s.fecha_devolucion||'—'}</td></tr>`).join('')}</tbody></table>`;
 }
-document.getElementById('q').addEventListener('input', renderMias);
+function renderMias(){
+  const act = DATA.solicitudes.filter(s => s.estado_solicitud==='Pendiente' || s.estado_solicitud==='Aprobado');
+  const hist = DATA.solicitudes.filter(s => s.estado_solicitud==='Devuelto' || s.estado_solicitud==='Rechazado');
+  document.getElementById('activos').innerHTML = tabla(act, 'No tienes préstamos activos.');
+  document.getElementById('mias').innerHTML = tabla(hist, 'Aún no hay historial.');
+}
 document.getElementById('form').addEventListener('submit', async e => {
   e.preventDefault();
   const body = Object.fromEntries(new FormData(e.target).entries());
@@ -204,7 +286,6 @@ document.getElementById('form').addEventListener('submit', async e => {
   const j = await r.json();
   if (!r.ok) return toast(j.error||'Error');
   toast('Solicitud enviada. Queda pendiente de aprobación.');
-  e.target.estudiante.value='';
   load();
 });
 load();
@@ -347,10 +428,208 @@ LOGIN = HEAD + """
 </body></html>
 """
 
-@app.get("/")
+
+CUENTA = HEAD + """
+<nav class="navbar navbar-expand bg-white border-bottom">
+  <div class="container">
+    <span class="navbar-brand fw-semibold">Materiales escolares</span>
+    <a class="btn btn-outline-success btn-sm" href="/admin">Acceso profesor</a>
+  </div>
+</nav>
+<main class="container py-4" style="max-width:520px">
+  <h1 class="h3">{{ titulo }}</h1>
+  <p class="text-secondary">{{ subtitulo }}</p>
+  <section class="card shadow-sm"><div class="card-body">
+    <form method="post">
+      {% if modo == 'registro' %}
+      <label class="form-label">Nombre completo</label>
+      <input class="form-control mb-2" name="nombre" required placeholder="Nombres y apellidos"/>
+      <div class="row g-2">
+        <div class="col-7">
+          <label class="form-label">Grado</label>
+          <select class="form-select" name="grado" required>
+            <option value="">Elige</option>
+            <option>6.º</option><option>7.º</option><option>8.º</option>
+            <option>9.º</option><option>10.º</option><option>11.º</option>
+          </select>
+        </div>
+        <div class="col-5">
+          <label class="form-label">Sección</label>
+          <select class="form-select" name="seccion" required>
+            <option value="">Elige</option>
+            <option>A</option><option>B</option><option>C</option><option>D</option><option>E</option>
+          </select>
+        </div>
+      </div>
+      <label class="form-label mt-2">Correo institucional</label>
+      <input class="form-control mb-2" name="correo" type="email" required placeholder="nombre@sanagustin.edu.pe"/>
+      {% elif modo == 'verificar' %}
+      <label class="form-label">Código de 6 dígitos</label>
+      <input class="form-control" name="codigo" required inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="000000"/>
+      {% else %}
+      <label class="form-label">Correo institucional</label>
+      <input class="form-control mb-2" name="correo" type="email" required placeholder="usuario@sanagustin.edu.pe"/>
+      {% endif %}
+      {% if modo != 'verificar' %}
+      <label class="form-label">Clave</label>
+      <input class="form-control" name="clave" type="password" required minlength="4"/>
+      {% endif %}
+      <button class="btn btn-success w-100 mt-3" type="submit">{{ boton }}</button>
+    </form>
+    {% if aviso %}<p class="alert alert-warning mt-3 mb-0">{{ aviso }}</p>{% endif %}
+    {% if error %}<p class="text-danger mt-3 mb-0">{{ error }}</p>{% endif %}
+    <p class="mt-3 mb-0">
+      {% if modo == 'registro' %}
+      <a href="/login">Ya tengo cuenta</a>
+      {% elif modo == 'verificar' %}
+      <a href="/login">Volver al inicio de sesión</a>
+      {% else %}
+      <a href="/registro">Crear cuenta</a>
+      {% endif %}
+    </p>
+  </div></section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body></html>
+"""
+
+
+def _render_cuenta(modo, error=None, aviso=None):
+    meta = {
+        "registro": ("Crear cuenta", "Registrarme", "Nombre, grado, sección y correo @sanagustin.edu.pe. Te enviaremos un código de 6 dígitos."),
+        "login": ("Entrar", "Entrar", "Correo institucional y clave. La cuenta debe estar verificada."),
+        "verificar": ("Verificar correo", "Confirmar código", "Escribe el código de 6 dígitos que enviamos a tu correo."),
+    }
+    titulo, boton, subtitulo = meta[modo]
+    return render_template_string(
+        CUENTA, title=titulo, css=BASE_CSS, modo=modo,
+        titulo=titulo, boton=boton, error=error, aviso=aviso, subtitulo=subtitulo,
+    )
+
+
+GRADOS = {"6.º", "7.º", "8.º", "9.º", "10.º", "11.º"}
+SECCIONES = {"A", "B", "C", "D", "E"}
+
+
+def _codigo():
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("usuario_id") and request.method == "GET":
+        return redirect("/")
+    if request.method == "GET":
+        return _render_cuenta("login")
+    correo = (request.form.get("correo") or "").strip().lower()
+    clave = request.form.get("clave") or ""
+    if not correo.endswith(DOMINIO):
+        return _render_cuenta("login", "El correo debe ser " + DOMINIO)
+    conn = get_db()
+    user = conn.execute("SELECT * FROM usuarios WHERE email = ?", (correo,)).fetchone()
+    conn.close()
+    if not user or hash_clave(clave, user["salt"])[1] != user["password_hash"]:
+        return _render_cuenta("login", "Correo o clave incorrectos")
+    if not user["is_verified"]:
+        session["pendiente_id"] = user["id"]
+        return redirect("/verificar")
+    session["usuario_id"] = user["id"]
+    session.pop("pendiente_id", None)
+    return redirect("/")
+
+
+@app.route("/registro", methods=["GET", "POST"])
+def registro():
+    if request.method == "GET":
+        return _render_cuenta("registro")
+    nombre = (request.form.get("nombre") or "").strip()
+    grado = (request.form.get("grado") or "").strip()
+    seccion = (request.form.get("seccion") or "").strip().upper()
+    correo = (request.form.get("correo") or "").strip().lower()
+    clave = request.form.get("clave") or ""
+    if len(nombre) < 5:
+        return _render_cuenta("registro", "Escribe tu nombre completo")
+    if grado not in GRADOS or seccion not in SECCIONES:
+        return _render_cuenta("registro", "Elige grado y sección de la lista")
+    if not correo.endswith(DOMINIO) or correo.count("@") != 1 or len(correo.split("@")[0]) < 2:
+        return _render_cuenta("registro", "Usa un correo institucional " + DOMINIO)
+    if len(clave) < 4:
+        return _render_cuenta("registro", "La clave debe tener al menos 4 caracteres")
+    conn = get_db()
+    if conn.execute("SELECT id FROM usuarios WHERE email = ?", (correo,)).fetchone():
+        conn.close()
+        return _render_cuenta("registro", "Ese correo ya está registrado")
+    salt, digest = hash_clave(clave)
+    codigo = _codigo()
+    grado_seccion = f"{grado} {seccion}"
+    cur = conn.execute(
+        """INSERT INTO usuarios
+           (nombre_completo, grado_seccion, email, password_hash, salt, rol, is_verified, verification_code)
+           VALUES (?, ?, ?, ?, ?, 'estudiante', 0, ?)""",
+        (nombre, grado_seccion, correo, digest, salt, codigo),
+    )
+    conn.commit()
+    uid = cur.lastrowid
+    conn.close()
+    session["pendiente_id"] = uid
+    session.pop("usuario_id", None)
+    try:
+        enviado = enviar_codigo(correo, codigo, nombre)
+    except Exception:
+        enviado = False
+    if not enviado:
+        session["codigo_local"] = codigo
+    return redirect("/verificar")
+
+
+@app.route("/verificar", methods=["GET", "POST"])
+def verificar():
+    uid = session.get("pendiente_id")
+    if not uid:
+        return redirect("/login")
+    aviso = None
+    if session.pop("codigo_local", None):
+        aviso = "El servidor no tiene correo configurado (MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD). El código de esta prueba es el que quedó en la base de datos."
+    conn = get_db()
+    user = conn.execute("SELECT * FROM usuarios WHERE id = ?", (uid,)).fetchone()
+    if not user:
+        conn.close()
+        return redirect("/registro")
+    if request.method == "GET":
+        if not os.environ.get("MAIL_USERNAME") and user["verification_code"]:
+            aviso = (aviso or "") + " Código de prueba: " + user["verification_code"]
+        conn.close()
+        return _render_cuenta("verificar", aviso=aviso)
+    codigo = (request.form.get("codigo") or "").strip()
+    if codigo != (user["verification_code"] or "") or len(codigo) != 6:
+        conn.close()
+        return _render_cuenta("verificar", "El código no coincide")
+    conn.execute("UPDATE usuarios SET is_verified = 1, verification_code = NULL WHERE id = ?", (uid,))
+    conn.commit()
+    conn.close()
+    session["usuario_id"] = uid
+    session.pop("pendiente_id", None)
+    return redirect("/")
+
+
+@app.route("/", methods=["GET"])
+def inicio():
+    conn = get_db()
+    user = usuario_actual(conn)
+    conn.close()
+    if not user or not user["is_verified"]:
+        return redirect("/login")
+    return render_template_string(
+        ESTUDIANTE, title="Materiales escolares", css=BASE_CSS,
+        nombre=user["nombre_completo"], grado=user["grado_seccion"], correo=user["email"],
+    )
+
+
 @app.get("/estudiante")
 def estudiante():
-    return render_template_string(ESTUDIANTE, title="Materiales escolares", css=BASE_CSS)
+    return redirect("/")
+
+
 
 
 @app.route("/admin", methods=["GET", "POST"])
@@ -374,6 +653,13 @@ def admin_panel():
     return render_template_string(ADMIN, title="Panel del profesor", css=BASE_CSS)
 
 
+@app.get("/salir")
+def salir_estudiante():
+    session.pop("usuario_id", None)
+    session.pop("pendiente_id", None)
+    return redirect("/login")
+
+
 @app.get("/admin/salir")
 def salir():
     session.clear()
@@ -383,11 +669,18 @@ def salir():
 @app.get("/api/publico")
 def publico():
     conn = get_db()
+    user = usuario_actual(conn)
+    if not user:
+        conn.close()
+        return jsonify({"error": "Inicia sesión"}), 401
     sync_tardanzas(conn)
     conn.commit()
     nombres = material_map(conn)
     disponibles = [dict(r) for r in conn.execute("SELECT id, nombre, estado FROM materiales WHERE estado = 'Disponible' ORDER BY nombre")]
-    sols = [fila(r, nombres) for r in conn.execute("SELECT * FROM solicitudes_prestamos ORDER BY id DESC LIMIT 80")]
+    sols = [fila(r, nombres) for r in conn.execute(
+        "SELECT * FROM solicitudes_prestamos WHERE usuario_id = ? ORDER BY id DESC LIMIT 80",
+        (user["id"],),
+    )]
     conn.close()
     return jsonify({"hoy": today().isoformat(), "disponibles": disponibles, "solicitudes": sols})
 
@@ -395,21 +688,23 @@ def publico():
 @app.post("/api/solicitudes")
 def crear_solicitud():
     body = request.get_json(force=True, silent=True) or {}
-    estudiante = (body.get("estudiante") or "").strip()
-    grado = (body.get("grado") or "").strip()
     fecha = (body.get("fecha_devolucion") or "").strip()
     try:
         mid = int(body.get("material_id"))
     except (TypeError, ValueError):
         return jsonify({"error": "Elige un material"}), 400
-    if len(estudiante) < 3 or not grado:
-        return jsonify({"error": "Nombre y grado son obligatorios"}), 400
+    conn = get_db()
+    user = usuario_actual(conn)
+    if not user:
+        conn.close()
+        return jsonify({"error": "Inicia sesión"}), 401
+    estudiante = user["nombre_completo"]
+    grado = user["grado_seccion"]
     try:
         if parse_date(fecha) < today():
             return jsonify({"error": "La fecha de entrega no puede ser anterior a hoy"}), 400
     except ValueError:
         return jsonify({"error": "Fecha inválida"}), 400
-    conn = get_db()
     mat = conn.execute("SELECT id, estado FROM materiales WHERE id = ?", (mid,)).fetchone()
     if not mat or mat["estado"] != "Disponible":
         conn.close()
@@ -423,9 +718,9 @@ def crear_solicitud():
         return jsonify({"error": "Ya hay una solicitud pendiente para ese material"}), 400
     conn.execute(
         """INSERT INTO solicitudes_prestamos
-           (estudiante, grado, material_id, fecha_solicitud, fecha_devolucion, estado_solicitud, dias_tardanza)
-           VALUES (?, ?, ?, ?, ?, 'Pendiente', 0)""",
-        (estudiante, grado, mid, today().isoformat(), fecha),
+           (estudiante, grado, material_id, fecha_solicitud, fecha_devolucion, estado_solicitud, dias_tardanza, usuario_id)
+           VALUES (?, ?, ?, ?, ?, 'Pendiente', 0, ?)""",
+        (estudiante, grado, mid, today().isoformat(), fecha, user["id"]),
     )
     conn.commit()
     conn.close()
