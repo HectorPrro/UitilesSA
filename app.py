@@ -109,106 +109,69 @@ def admin_required(fn):
 
 
 BASE_CSS = """
-:root {
-  --ink:#1c1915; --muted:#6b645b; --line:#e6dfd4; --paper:#f6f1e8; --card:#fffdf9;
-  --accent:#0f6e56; --accent-2:#e8f5ef; --warn:#9a3412; --warn-bg:#fff1e8; --danger:#b42318;
-}
-* { box-sizing:border-box; }
-body {
-  margin:0; font-family:Outfit,system-ui,sans-serif; color:var(--ink);
-  background:
-    radial-gradient(1100px 420px at 100% -10%, #d7efe6 0%, transparent 55%),
-    radial-gradient(800px 360px at -10% 0%, #f3e2c4 0%, transparent 50%),
-    var(--paper);
-  min-height:100vh;
-}
-a { color:var(--accent); }
-header, main { max-width:1100px; margin:0 auto; padding:22px 18px; }
-header { padding-bottom:0; display:flex; justify-content:space-between; gap:12px; align-items:flex-end; flex-wrap:wrap; }
-h1 { font-family:Fraunces,Georgia,serif; font-size:clamp(1.6rem,3vw,2.3rem); margin:0 0 4px; letter-spacing:-.02em; }
-header p, .muted { color:var(--muted); margin:0; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 10px 30px rgba(60,40,10,.06); }
-.grid { display:grid; grid-template-columns:340px 1fr; gap:16px; }
-.stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:16px 0; }
-.stat { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
-.stat b { display:block; font-family:Fraunces,serif; font-size:1.5rem; }
-.stat.warn { background:var(--warn-bg); border-color:#f3c7b0; }
-.stat.warn b { color:var(--warn); }
-label { display:block; font-size:.82rem; font-weight:600; margin:10px 0 4px; }
-input, select, button { font:inherit; width:100%; border-radius:12px; border:1px solid #d9d1c5; padding:10px 12px; background:#fff; color:var(--ink); }
-button { cursor:pointer; background:var(--accent); color:#fff; border:none; font-weight:600; }
-button.ghost { background:transparent; color:var(--accent); border:1px solid #b7d9cc; width:auto; }
-button.danger { background:var(--danger); width:auto; }
-button.ok { background:#0f6e56; width:auto; }
-button.no { background:#9a3412; width:auto; }
-.row-actions { display:flex; gap:6px; flex-wrap:wrap; }
-table { width:100%; border-collapse:collapse; font-size:.92rem; }
-th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-th { font-size:.72rem; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
-.pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.75rem; font-weight:700; background:var(--accent-2); color:var(--accent); }
-.pill.bad { background:#fee4e2; color:var(--danger); }
-.pill.wait { background:#fff4d6; color:#92400e; }
-.pill.off { background:#efe8dc; color:#5c5348; }
-tr.late { background:#fff5f3; }
-tr.late td:first-child { box-shadow:inset 3px 0 0 var(--danger); }
-.tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-.tabs button { width:auto; background:#efe8dc; color:var(--ink); }
-.tabs button.on { background:var(--ink); color:#fff; }
-.toast { position:fixed; bottom:16px; right:16px; background:var(--ink); color:#fff; padding:12px 14px; border-radius:12px; opacity:0; transform:translateY(8px); transition:.25s; }
-.toast.show { opacity:1; transform:none; }
-.nav a { margin-left:12px; font-weight:600; text-decoration:none; }
-.empty { color:var(--muted); }
-@media (max-width:860px) { .grid, .stats { grid-template-columns:1fr 1fr; } .grid { grid-template-columns:1fr; } }
+tr.late { background:#fff5f5; }
+tr.late td:first-child { box-shadow: inset 3px 0 0 #dc3545; }
+.toast-app { position:fixed; bottom:16px; right:16px; z-index:1080; }
 """
 
 HEAD = """
 <!DOCTYPE html><html lang="es"><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{title}</title>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,650&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<style>{css}</style></head><body>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+<style>{css}</style>
+</head><body class="bg-light">
 """
 
 ESTUDIANTE = HEAD + """
-<header>
-  <div>
-    <h1>Catálogo de materiales</h1>
-    <p>Solicita un préstamo. El profesor debe aprobarlo antes de entregarte el material.</p>
+<nav class="navbar navbar-expand bg-white border-bottom">
+  <div class="container">
+    <span class="navbar-brand fw-semibold">Materiales escolares</span>
+    <a class="btn btn-outline-success btn-sm" href="/admin">Acceso profesor</a>
   </div>
-  <nav class="nav"><a href="/admin">Acceso profesor</a></nav>
-</header>
-<main>
-  <div class="grid">
-    <section class="card">
-      <h2>Solicitud de préstamo</h2>
-      <form id="form">
-        <label>Nombre completo</label>
-        <input name="estudiante" required placeholder="Nombre y apellido"/>
-        <label>Grado / sección</label>
-        <input name="grado" required placeholder="Ej. 4° A"/>
-        <label>Material deseado</label>
-        <select name="material_id" id="mats" required></select>
-        <label>Fecha propuesta de entrega</label>
-        <input type="date" name="fecha_devolucion" id="fdev" required/>
-        <button type="submit" style="margin-top:14px">Enviar solicitud</button>
-        <p class="muted" style="margin-top:10px;font-size:.85rem">Estado inicial: Pendiente de aprobación por el profesor.</p>
-      </form>
-    </section>
-    <section class="card">
-      <h2>Disponibles ahora</h2>
-      <div id="catalogo"></div>
-      <h2 style="margin-top:18px">Mis solicitudes recientes</h2>
-      <div class="search" style="display:flex;gap:8px;margin-bottom:8px">
-        <input id="q" placeholder="Busca por tu nombre"/>
-      </div>
-      <div id="mias"></div>
-    </section>
+</nav>
+<main class="container py-4">
+  <h1 class="h3 mb-1">Catálogo de materiales</h1>
+  <p class="text-secondary mb-4">Solicita un préstamo. El profesor debe aprobarlo antes de entregarte el material.</p>
+  <div class="row g-4">
+    <div class="col-lg-4">
+      <section class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5 card-title">Solicitud de préstamo</h2>
+          <form id="form">
+            <label class="form-label">Nombre completo</label>
+            <input class="form-control mb-2" name="estudiante" required placeholder="Nombre y apellido"/>
+            <label class="form-label">Grado / sección</label>
+            <input class="form-control mb-2" name="grado" required placeholder="Ej. 4° A"/>
+            <label class="form-label">Material deseado</label>
+            <select class="form-select mb-2" name="material_id" id="mats" required></select>
+            <label class="form-label">Fecha propuesta de entrega</label>
+            <input class="form-control" type="date" name="fecha_devolucion" id="fdev" required/>
+            <button class="btn btn-success w-100 mt-3" type="submit">Enviar solicitud</button>
+            <p class="text-secondary small mt-2 mb-0">Estado inicial: Pendiente de aprobación por el profesor.</p>
+          </form>
+        </div>
+      </section>
+    </div>
+    <div class="col-lg-8">
+      <section class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Disponibles ahora</h2>
+          <div id="catalogo" class="table-responsive"></div>
+          <h2 class="h5 mt-4">Mis solicitudes recientes</h2>
+          <input id="q" class="form-control mb-3" placeholder="Busca por tu nombre"/>
+          <div id="mias" class="table-responsive"></div>
+        </div>
+      </section>
+    </div>
   </div>
 </main>
-<div class="toast" id="toast"></div>
+<div class="toast-app toast align-items-center text-bg-dark border-0" id="toast" role="alert"><div class="d-flex"><div class="toast-body" id="toastMsg"></div></div></div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]));
-function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+function toast(m){ document.getElementById('toastMsg').textContent=m; bootstrap.Toast.getOrCreateInstance(document.getElementById('toast'), {delay:2200}).show(); }
 let DATA;
 async function load(){
   const r = await fetch('/api/publico');
@@ -220,19 +183,18 @@ async function load(){
     document.getElementById('fdev').value = d.toISOString().slice(0,10);
   }
   document.getElementById('catalogo').innerHTML = DATA.disponibles.length
-    ? `<table><thead><tr><th>Material</th><th>Estado</th></tr></thead><tbody>${DATA.disponibles.map(m=>`<tr><td>${esc(m.nombre)}</td><td><span class="pill">Disponible</span></td></tr>`).join('')}</tbody></table>`
-    : '<p class="empty">No hay materiales libres en este momento.</p>';
+    ? `<table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Material</th><th>Estado</th></tr></thead><tbody>${DATA.disponibles.map(m=>`<tr><td>${esc(m.nombre)}</td><td><span class="badge text-bg-success">Disponible</span></td></tr>`).join('')}</tbody></table>`
+    : '<p class="text-secondary mb-0">No hay materiales libres en este momento.</p>';
   renderMias();
 }
 function renderMias(){
   const q = document.getElementById('q').value.trim().toLowerCase();
   const rows = DATA.solicitudes.filter(s => !q || s.estudiante.toLowerCase().includes(q));
-  const pill = e => e==='Pendiente'?'wait':e==='Rechazado'?'off':e==='Devuelto'?'off':(s=>s)?'':'';
-  document.getElementById('mias').innerHTML = rows.length ? `<table><thead><tr><th>Estudiante</th><th>Material</th><th>Estado</th><th>Entrega</th></tr></thead><tbody>
-    ${rows.slice(0,30).map(s=>`<tr class="${s.dias_tardanza>0?'late':''}"><td>${esc(s.estudiante)}<br><small>${esc(s.grado)}</small></td><td>${esc(s.material)}</td>
-    <td><span class="pill ${s.estado_solicitud==='Pendiente'?'wait':s.estado_solicitud==='Aprobado'&&s.dias_tardanza?'bad':s.estado_solicitud==='Rechazado'||s.estado_solicitud==='Devuelto'?'off':''}">${esc(s.estado_solicitud)}</span>
-    ${s.dias_tardanza>0?`<div style="color:#b42318;font-weight:700;margin-top:4px">${s.dias_tardanza} día(s) de atraso</div>`:''}</td>
-    <td>${s.fecha_devolucion||'—'}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">Escribe tu nombre para ver tus solicitudes, o envía una nueva.</p>';
+  document.getElementById('mias').innerHTML = rows.length ? `<table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Estudiante</th><th>Material</th><th>Estado</th><th>Entrega</th></tr></thead><tbody>
+    ${rows.slice(0,30).map(s=>`<tr class="${s.dias_tardanza>0?'late':''}"><td>${esc(s.estudiante)}<br><small class="text-secondary">${esc(s.grado)}</small></td><td>${esc(s.material)}</td>
+    <td><span class="badge ${s.estado_solicitud==='Pendiente'?'text-bg-warning':s.estado_solicitud==='Aprobado'&&s.dias_tardanza?'text-bg-danger':s.estado_solicitud==='Rechazado'||s.estado_solicitud==='Devuelto'?'text-bg-secondary':'text-bg-success'}">${esc(s.estado_solicitud)}</span>
+    ${s.dias_tardanza>0?`<div class="text-danger fw-semibold small mt-1">${s.dias_tardanza} día(s) de atraso</div>`:''}</td>
+    <td>${s.fecha_devolucion||'—'}</td></tr>`).join('')}</tbody></table>` : '<p class="text-secondary mb-0">Escribe tu nombre para ver tus solicitudes, o envía una nueva.</p>';
 }
 document.getElementById('q').addEventListener('input', renderMias);
 document.getElementById('form').addEventListener('submit', async e => {
@@ -250,29 +212,36 @@ load();
 """
 
 ADMIN = HEAD + """
-<header>
-  <div>
-    <h1>Panel del profesor</h1>
-    <p>Aprueba solicitudes, registra devoluciones y controla atrasos.</p>
-  </div>
-  <nav class="nav"><a href="/">Vista estudiante</a> <a href="/admin/salir">Salir</a></nav>
-</header>
-<main>
-  <section class="stats" id="stats"></section>
-  <section class="card">
-    <div class="tabs" id="tabs">
-      <button type="button" data-tab="pendientes" class="on">Solicitudes pendientes</button>
-      <button type="button" data-tab="activos">Devoluciones</button>
-      <button type="button" data-tab="atrasos">Tardanzas</button>
-      <button type="button" data-tab="historial">Historial</button>
+<nav class="navbar navbar-expand bg-white border-bottom">
+  <div class="container">
+    <span class="navbar-brand fw-semibold">Panel del profesor</span>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="/">Vista estudiante</a>
+      <a class="btn btn-outline-danger btn-sm" href="/admin/salir">Salir</a>
     </div>
-    <div id="panel"></div>
+  </div>
+</nav>
+<main class="container py-4">
+  <h1 class="h3 mb-1">Panel del profesor</h1>
+  <p class="text-secondary">Aprueba solicitudes, registra devoluciones y controla atrasos.</p>
+  <section class="row g-3 mb-3" id="stats"></section>
+  <section class="card shadow-sm">
+    <div class="card-body">
+      <div class="btn-group flex-wrap mb-3" id="tabs" role="group">
+        <button type="button" class="btn btn-dark" data-tab="pendientes">Solicitudes pendientes</button>
+        <button type="button" class="btn btn-outline-dark" data-tab="activos">Devoluciones</button>
+        <button type="button" class="btn btn-outline-dark" data-tab="atrasos">Tardanzas</button>
+        <button type="button" class="btn btn-outline-dark" data-tab="historial">Historial</button>
+      </div>
+      <div id="panel" class="table-responsive"></div>
+    </div>
   </section>
 </main>
-<div class="toast" id="toast"></div>
+<div class="toast-app toast align-items-center text-bg-dark border-0" id="toast" role="alert"><div class="d-flex"><div class="toast-body" id="toastMsg"></div></div></div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]));
-function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+function toast(m){ document.getElementById('toastMsg').textContent=m; bootstrap.Toast.getOrCreateInstance(document.getElementById('toast'), {delay:2200}).show(); }
 let DATA, TAB='pendientes';
 async function load(){
   const r = await fetch('/api/admin/estado');
@@ -280,20 +249,20 @@ async function load(){
   DATA = await r.json();
   const s = DATA.resumen;
   document.getElementById('stats').innerHTML = [
-    ['Pendientes', s.pendientes],
-    ['Activos', s.aprobados],
-    ['Disponibles', s.disponibles],
-    ['Con atraso', s.atrasados, true],
-  ].map(([k,v,w])=>`<div class="stat ${w&&v?'warn':''}"><b>${v}</b><span>${k}</span></div>`).join('');
+    ['Pendientes', s.pendientes, 'text-bg-warning'],
+    ['Activos', s.aprobados, 'text-bg-success'],
+    ['Disponibles', s.disponibles, 'text-bg-light'],
+    ['Con atraso', s.atrasados, 'text-bg-danger'],
+  ].map(([k,v,c])=>`<div class="col-6 col-md-3"><div class="card shadow-sm"><div class="card-body"><div class="fs-3 fw-semibold">${v}</div><div class="text-secondary small">${k}</div></div></div></div>`).join('');
   render();
 }
 function table(rows, cols){
-  if (!rows.length) return '<p class="empty">Sin registros en esta vista.</p>';
-  return `<div style="overflow:auto"><table><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
+  if (!rows.length) return '<p class="text-secondary mb-0">Sin registros en esta vista.</p>';
+  return `<table class="table table-hover align-middle mb-0"><thead class="table-light"><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr class="${r.dias_tardanza>0 && r.estado_solicitud==='Aprobado'?'late':''}">${cols.map(c=>`<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}
-  </tbody></table></div>`;
+  </tbody></table>`;
 }
-const estudiante = r => `${esc(r.estudiante)}<br><small>${esc(r.grado)}</small>${r.dias_tardanza>0?`<div style="color:#b42318;font-weight:700">${r.dias_tardanza} día(s) de atraso</div>`:''}`;
+const estudiante = r => `${esc(r.estudiante)}<br><small class="text-secondary">${esc(r.grado)}</small>${r.dias_tardanza>0?`<div class="text-danger fw-semibold">${r.dias_tardanza} día(s) de atraso</div>`:''}`;
 function render(){
   const p = document.getElementById('panel');
   if (TAB==='pendientes') {
@@ -302,7 +271,7 @@ function render(){
       ['Material', r=>esc(r.material)],
       ['Solicitado', r=>esc(r.fecha_solicitud)],
       ['Entrega propuesta', r=>esc(r.fecha_devolucion)],
-      ['', r=>`<div class="row-actions"><button class="ok" data-ok="${r.id}">Aprobar</button><button class="no" data-no="${r.id}">Rechazar</button></div>`],
+      ['', r=>`<div class="d-flex gap-1"><button class="btn btn-success btn-sm" data-ok="${r.id}">Aprobar</button><button class="btn btn-outline-danger btn-sm" data-no="${r.id}">Rechazar</button></div>`],
     ]);
   } else if (TAB==='activos') {
     p.innerHTML = table(DATA.activos, [
@@ -310,16 +279,16 @@ function render(){
       ['Material', r=>esc(r.material)],
       ['Desde', r=>esc(r.fecha_prestamo)],
       ['Debe devolver', r=>esc(r.fecha_devolucion)],
-      ['', r=>`<button class="danger" data-dev="${r.id}">Marcar devuelto</button>`],
+      ['', r=>`<button class="btn btn-danger btn-sm" data-dev="${r.id}">Marcar devuelto</button>`],
     ]);
   } else if (TAB==='atrasos') {
-    p.innerHTML = `<p class="muted" style="margin-top:0">Hoy es ${DATA.hoy}. En rojo: préstamos aprobados cuya fecha de devolución ya pasó.</p>` +
+    p.innerHTML = `<p class="text-secondary">Hoy es ${DATA.hoy}. En rojo: préstamos aprobados cuya fecha de devolución ya pasó.</p>` +
       table(DATA.atrasados, [
         ['Estudiante', estudiante],
         ['Material', r=>esc(r.material)],
         ['Fecha límite', r=>esc(r.fecha_devolucion)],
-        ['Días de tardanza', r=>`<b style="color:#b42318">${r.dias_tardanza}</b>`],
-        ['', r=>`<button class="danger" data-dev="${r.id}">Registrar devolución</button>`],
+        ['Días de tardanza', r=>`<span class="badge text-bg-danger">${r.dias_tardanza}</span>`],
+        ['', r=>`<button class="btn btn-danger btn-sm" data-dev="${r.id}">Registrar devolución</button>`],
       ]);
   } else {
     p.innerHTML = table(DATA.historial, [
@@ -330,7 +299,7 @@ function render(){
       ['Préstamo', r=>esc(r.fecha_prestamo||'—')],
       ['Devolución prevista', r=>esc(r.fecha_devolucion||'—')],
       ['Real', r=>esc(r.fecha_real||'—')],
-      ['Estado', r=>`<span class="pill ${r.estado_solicitud==='Pendiente'?'wait':r.estado_solicitud==='Aprobado'&&r.dias_tardanza?'bad':r.estado_solicitud==='Rechazado'||r.estado_solicitud==='Devuelto'?'off':''}">${esc(r.estado_solicitud)}</span>`],
+      ['Estado', r=>`<span class="badge ${r.estado_solicitud==='Pendiente'?'text-bg-warning':r.estado_solicitud==='Aprobado'&&r.dias_tardanza?'text-bg-danger':r.estado_solicitud==='Rechazado'||r.estado_solicitud==='Devuelto'?'text-bg-secondary':'text-bg-success'}">${esc(r.estado_solicitud)}</span>`],
       ['Tardanza', r=> r.estado_solicitud==='Aprobado' && r.dias_tardanza ? r.dias_tardanza+' días' : '0'],
     ]);
   }
@@ -348,7 +317,10 @@ async function accion(url, id){
 document.getElementById('tabs').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
   TAB = b.dataset.tab;
-  [...document.getElementById('tabs').children].forEach(x=>x.classList.toggle('on', x===b));
+  [...document.getElementById('tabs').children].forEach(x=>{
+    x.classList.toggle('btn-dark', x===b);
+    x.classList.toggle('btn-outline-dark', x!==b);
+  });
   render();
 };
 load();
@@ -356,21 +328,24 @@ load();
 """
 
 LOGIN = HEAD + """
-<main style="max-width:420px">
-  <section class="card">
-    <h1>Profesor</h1>
-    <p class="muted">Ingresa el PIN para abrir el panel.</p>
-    <form method="post">
-      <label>PIN</label>
-      <input name="pin" type="password" inputmode="numeric" required autofocus placeholder="••••"/>
-      <button type="submit" style="margin-top:14px">Entrar</button>
-    </form>
-    {% if error %}<p style="color:#b42318">{{ error }}</p>{% endif %}
-    <p><a href="/">Volver al catálogo</a></p>
+<main class="container py-5" style="max-width:420px">
+  <section class="card shadow-sm">
+    <div class="card-body">
+      <h1 class="h4">Profesor</h1>
+      <p class="text-secondary">Ingresa el PIN para abrir el panel.</p>
+      <form method="post">
+        <label class="form-label">PIN</label>
+        <input class="form-control" name="pin" type="password" inputmode="numeric" required autofocus placeholder="••••"/>
+        <button class="btn btn-success w-100 mt-3" type="submit">Entrar</button>
+      </form>
+      {% if error %}<p class="text-danger mt-3 mb-0">{{ error }}</p>{% endif %}
+      <p class="mt-3 mb-0"><a href="/">Volver al catálogo</a></p>
+    </div>
   </section>
-</main></body></html>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body></html>
 """
-
 
 @app.get("/")
 @app.get("/estudiante")
