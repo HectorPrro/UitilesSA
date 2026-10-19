@@ -21,22 +21,24 @@ DOMINIO = "@sanagustin.edu.pe"
 
 
 def enviar_codigo(destino, codigo, nombre):
-    host = os.environ.get("MAIL_SERVER")
-    user = os.environ.get("MAIL_USERNAME")
-    password = os.environ.get("MAIL_PASSWORD")
-    port = int(os.environ.get("MAIL_PORT", "587"))
+    host = (os.environ.get("MAIL_SERVER") or "").strip()
+    user = (os.environ.get("MAIL_USERNAME") or "").strip()
+    password = (os.environ.get("MAIL_PASSWORD") or "").replace(" ", "").strip()
+    port = int((os.environ.get("MAIL_PORT") or "587").strip() or "587")
     if not host or not user or not password:
         return False
     msg = EmailMessage()
     msg["Subject"] = "Código de verificación — Materiales San Agustín"
-    msg["From"] = os.environ.get("MAIL_FROM", user)
+    msg["From"] = (os.environ.get("MAIL_FROM") or user).strip()
     msg["To"] = destino
     msg.set_content(
         f"Hola {nombre},\n\nTu código de verificación es {codigo}.\n"
         "Ingrésalo en la página de verificación para activar tu cuenta.\n"
     )
     with smtplib.SMTP(host, port, timeout=20) as smtp:
+        smtp.ehlo()
         smtp.starttls()
+        smtp.ehlo()
         smtp.login(user, password)
         smtp.send_message(msg)
     return True
@@ -588,16 +590,15 @@ def verificar():
     if not uid:
         return redirect("/login")
     aviso = None
-    if session.pop("codigo_local", None):
-        aviso = "El servidor no tiene correo configurado (MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD). El código de esta prueba es el que quedó en la base de datos."
+    mostrar_codigo = bool(session.pop("codigo_local", None))
     conn = get_db()
     user = conn.execute("SELECT * FROM usuarios WHERE id = ?", (uid,)).fetchone()
     if not user:
         conn.close()
         return redirect("/registro")
     if request.method == "GET":
-        if not os.environ.get("MAIL_USERNAME") and user["verification_code"]:
-            aviso = (aviso or "") + " Código de prueba: " + user["verification_code"]
+        if mostrar_codigo and user["verification_code"]:
+            aviso = "No se pudo enviar el correo. Copia este código y confírmalo abajo: " + user["verification_code"]
         conn.close()
         return _render_cuenta("verificar", aviso=aviso)
     codigo = (request.form.get("codigo") or "").strip()
